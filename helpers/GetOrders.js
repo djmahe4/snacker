@@ -1,42 +1,37 @@
-import { db } from "@/firebase/config";
-import { collection, getDocs, orderBy, query, where } from "firebase/firestore";
+import { adminDb } from "@/firebase/admin";
+export { formatDateToYYYYMMDD, formatTimeTo12Hour } from "@/lib/utils";
 
-export const getOrders = async (userId) => {
-  try {
-    let orders = [];
-    const q = query(
-      collection(db, "orders"),
-      where("userId", "==", userId),
-      orderBy("timeStamp", "desc"),
-    );
-    const querySnapshot = await getDocs(q);
-    querySnapshot.forEach((doc) => {
-      console.log(doc.id, " => ", doc.data());
-      const data = doc.data();
-      orders.push({ id: doc.id, ...data });
-    });
-    return orders;
-  } catch (error) {
-    console.log(error);
-    return null;
-  }
+// Server-only: Firestore rules deny all client reads of `orders`, so this runs through the
+// Admin SDK and is scoped to the caller's own userId by the page that invokes it.
+const toIso = (value) => {
+  if (!value) return null;
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  return value;
 };
 
-export function formatDateToYYYYMMDD(date) {
-  let newDate = new Date(date.seconds * 1000);
-  const year = newDate.getFullYear();
-  const month = String(newDate.getMonth() + 1).padStart(2, "0");
-  const day = String(newDate.getDate()).padStart(2, "0");
+export const getOrders = async (userId) => {
+  if (!userId) return [];
+  try {
+    const snapshot = await adminDb
+      .collection("orders")
+      .where("userId", "==", userId)
+      .get();
 
-  return `${year}-${month}-${day}`;
-}
+    const orders = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return { id: doc.id, ...data, timeStamp: toIso(data.timeStamp) };
+    });
 
-export function formatTimeTo12Hour(date) {
-  let newDate = new Date(date.seconds * 1000);
-  let hours = newDate.getHours();
-  const minutes = String(newDate.getMinutes()).padStart(2, "0");
-  const ampm = hours >= 12 ? "PM" : "AM";
+    // In-memory sort: latest orders first
+    orders.sort(
+      (a, b) =>
+        new Date(b.timeStamp || 0).getTime() -
+        new Date(a.timeStamp || 0).getTime(),
+    );
 
-  hours = hours % 12 || 12;
-  return `${hours}:${minutes} ${ampm}`;
-}
+    return orders;
+  } catch (error) {
+    console.error("Error fetching orders:", error);
+    return [];
+  }
+};

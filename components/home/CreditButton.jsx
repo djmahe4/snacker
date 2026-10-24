@@ -3,8 +3,6 @@ import React, { useState, useEffect } from "react";
 import { FaCreditCard } from "react-icons/fa";
 import useSnackerStore from "@/hooks/useSnackerStore";
 import { Skeleton } from "../ui/skeleton";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "@/firebase/config";
 import { TbSquareRoundedPlusFilled } from "react-icons/tb";
 
 const CreditButton = ({ userId }) => {
@@ -16,27 +14,40 @@ const CreditButton = ({ userId }) => {
   const [load, setLoad] = useState(true);
 
   useEffect(() => {
-    getCredits();
-  }, []);
-
-  const getCredits = async () => {
-    setLoad(true);
-    try {
-      const docRef = doc(db, "users", userId);
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        console.log("Document data:", docSnap.data());
-        const data = docSnap.data();
-        setCredit(data.credit);
-      } else {
-        console.log("No such document!");
-      }
-    } catch (e) {
-      console.log(e.message);
+    if (!userId) {
+      setLoad(false);
+      return;
     }
-    setLoad(false);
-  };
+
+    // Poll the server for the balance (Firestore rules block direct client reads), so the
+    // wallet still updates shortly after the background webhook credits a recharge.
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const res = await fetch("/api/wallet", { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled && data.exists) setCredit(data.credit ?? 0);
+      } catch (error) {
+        console.error("Wallet sync error:", error);
+      } finally {
+        if (!cancelled) setLoad(false);
+      }
+    };
+
+    refresh();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 5000);
+    document.addEventListener("visibilitychange", refresh);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [userId, setCredit]);
+
   return (
     <div className="relative">
       {load ? (
