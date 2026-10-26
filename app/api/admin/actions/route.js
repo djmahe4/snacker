@@ -183,6 +183,21 @@ export async function POST(req) {
       case "toggle_maintenance": {
         const { status } = payload || {};
         const isMaintenance = Boolean(status);
+        // Server-side flag: blocks orders and top-ups, and takes the payment gateway offline.
+        // Going live restores "online" only if the Pi tunnel has published a host URL.
+        const gatewayRef = adminDb.collection("config").doc("gateway");
+        const gatewayDoc = await gatewayRef.get();
+        await gatewayRef.set(
+          {
+            maintenance: isMaintenance,
+            status:
+              !isMaintenance && gatewayDoc.data()?.hostUrl ? "online" : "offline",
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        // Realtime flag drives the maintenance screen in the client (components/shared/Tab.jsx)
         if (rtdb) {
           await set(ref(rtdb, "/onStockUpdation/status"), isMaintenance);
         }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { nanoid } from "nanoid";
 import { adminDb } from "@/firebase/admin";
+import { isMaintenanceMode, maintenanceResponse } from "@/lib/maintenance";
 
 // Configurable gateway endpoint supporting local dev, subdomains, Docker, and remote production hosting
 const DEFAULT_GATEWAY_URL = (
@@ -60,6 +61,8 @@ export async function POST(request) {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  if (await isMaintenanceMode()) return maintenanceResponse();
 
   if (!MERCHANT_ID) {
     console.error("YOUPI_MERCHANT_ID is not set; refusing to create payments");
