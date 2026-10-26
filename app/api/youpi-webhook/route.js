@@ -51,10 +51,17 @@ export async function POST(req) {
         if (paymentDoc.exists) return;
 
         const userDoc = await transaction.get(userRef);
-        if (!userDoc.exists) throw new Error("User document does not exist");
-
-        const currentCredit = userDoc.data()?.credit || 0;
-        transaction.update(userRef, { credit: currentCredit + amountInINR });
+        // A Clerk user may pay before their wallet doc exists; create it rather than lose the payment
+        const currentCredit = userDoc.exists ? userDoc.data()?.credit || 0 : 0;
+        transaction.set(
+          userRef,
+          {
+            userId,
+            credit: currentCredit + amountInINR,
+            ...(userDoc.exists ? {} : { timeStamp: FieldValue.serverTimestamp() }),
+          },
+          { merge: true },
+        );
         transaction.set(paymentRef, {
           userId,
           orderId,
