@@ -12,7 +12,7 @@ const DEFAULT_GATEWAY_URL = (
 ).replace(/\/$/, "");
 
 const MERCHANT_ID = process.env.YOUPI_MERCHANT_ID;
-const MAX_TOPUP_INR = 5000;
+const MAX_TOPUP_INR = 10000;
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"];
 
 // Hosts the Firestore config/gateway doc may point at. That doc is written by the Pi
@@ -81,7 +81,7 @@ export async function POST(request) {
   const amount = Number(body?.amount);
   if (!Number.isInteger(amount) || amount < 1 || amount > MAX_TOPUP_INR) {
     return NextResponse.json(
-      { error: `Amount must be a whole number between 1 and ${MAX_TOPUP_INR}` },
+      { error: "Enter a whole amount between ₹1 and ₹10,000" },
       { status: 400 },
     );
   }
@@ -125,6 +125,7 @@ export async function POST(request) {
     // Connect to YouPI-PG FCFS payment gateway (POST /api/v1/payments)
     const res = await fetch(`${gatewayUrl}/api/v1/payments`, {
       method: "POST",
+      signal: AbortSignal.timeout(8000),
       headers: {
         "Content-Type": "application/json",
         "X-Merchant-Id": MERCHANT_ID,
@@ -168,10 +169,10 @@ export async function POST(request) {
     });
   } catch (error) {
     // Never fake success: the user would think the recharge started when it did not
-    console.error("YouPI-PG gateway unreachable:", error.message);
+    console.error("YouPI-PG gateway unreachable:", gatewayUrl, error.message);
     return NextResponse.json(
-      { error: "Payment gateway is offline. Please try again later." },
-      { status: 502 },
+      { error: "Payment gateway is offline. Please try again in a minute." },
+      { status: 503 },
     );
   }
 }
