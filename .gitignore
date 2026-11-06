@@ -42,3 +42,10 @@ next-env.d.ts
 **/public/sw.js.map
 **/public/workbox-*.js.map
 **/public/worker-*.js.map
+
+# Secret keys
+serviceAccountKey.json
+*serviceAccountKey*.json
+.env
+**/public/fallback-*.js
+**/public/fallback-*.js.map
