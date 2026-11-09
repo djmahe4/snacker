@@ -1,47 +1,86 @@
-import { createOrderId } from "./createOrderId";
-
 export const processPayment = async (amount, user) => {
-  return new Promise((resolve, reject) => {
-    createOrderId(amount)
-      .then((orderId) => {
-        if (!orderId) {
-          return reject(new Error("Failed to create order ID"));
-        }
+  try {
+    const response = await fetch("/api/order", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: parseFloat(amount),
+      }),
+    });
 
-        const options = {
-          key: process.env.NEXT_PUBLIC_RAZORPAY_API_KEY_ID,
-          amount: parseFloat(amount) * 100,
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || "Failed to initialize payment");
+    }
+
+    const data = await response.json();
+
+    // A closed Radix/vaul drawer can leave `pointer-events: none` on <body>, which the
+    // YouPI modal (appended to <body>) inherits, making it unclickable.
+    if (typeof document !== "undefined") {
+      document.body.style.pointerEvents = "";
+    }
+
+    return new Promise((resolve) => {
+      // 1. In-App Popup Modal with YouPI-PG SDK
+      // Safari (iPhone and Mac) is skipped: the modal embeds the checkout in a cross-origin
+      // iframe, which YouPI's `frame-ancestors 'self'` CSP blocks and Safari's tracking
+      // prevention further restricts, leaving a blank modal (no QR on Mac, no page on iPhone).
+      // A top-level navigation to the hosted checkout works everywhere.
+      const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+      const isSafari =
+        /iPhone|iPad|iPod/.test(ua) ||
+        (/Safari/.test(ua) && !/Chrome|Chromium|CriOS|FxiOS|Edg|OPR/.test(ua)) ||
+        (typeof navigator !== "undefined" && navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+      if (isSafari && data.checkoutUrl) {
+        window.location.assign(data.checkoutUrl);
+        resolve({ ok: true, orderId: data.orderId, checkoutUrl: data.checkoutUrl });
+        return;
+      }
+
+      if (typeof window !== "undefined" && window.Youpi && data.checkoutUrl) {
+        window.Youpi.pay({
+          checkoutUrl: data.checkoutUrl,
+          order_id: data.orderId,
+          amount: parseFloat(amount),
           currency: "INR",
-          name: "Snacker",
-          description: "Vend your snacks",
-          order_id: orderId,
-          notes: {
-            userId: user.id,
-          },
-          handler: async function (response) {
-            return resolve({ ok: true, orderId });
-          },
-          prefill: {
-            name: user?.username || "",
+          name: "Snacker Wallet",
+          description: "Snacker Points Top-Up",
+          customer: {
+            name: user?.fullName || user?.firstName || "Customer",
             email: user?.primaryEmailAddress?.emailAddress || "",
           },
-          theme: {
-            color: "#0D0D0D",
+          handler: function (res) {
+            console.log("YouPI in-app modal confirmed payment:", res);
+            resolve({ ok: true, orderId: data.orderId, utr: res?.utr });
           },
-          retry: {
-            enabled: false,
+          onClose: function () {
+            console.log("Customer closed YouPI payment modal");
+            resolve({ ok: true, orderId: data.orderId, closed: true });
           },
-        };
-
-        const paymentObject = new window.Razorpay(options);
-        paymentObject.on("payment.failed", async function (response) {
-          return reject(new Error("Payment failed"));
         });
-        paymentObject.open();
-      })
-      .catch(async (error) => {
-        console.error("Error creating order ID:", error.message);
-        return reject(error);
-      });
-  });
+        return;
+      }
+
+      // 2. Fallback: Open hosted checkout window
+      if (data.checkoutUrl) {
+        // Mobile browsers block window.open() outside the tap handler (we awaited a fetch
+        // first) and return null. Fall back to opening checkout in this tab.
+        const tab = window.open(data.checkoutUrl, "_blank");
+        if (!tab) {
+          window.location.assign(data.checkoutUrl);
+        }
+        resolve({ ok: true, orderId: data.orderId, checkoutUrl: data.checkoutUrl });
+        return;
+      }
+
+      resolve({ ok: true, orderId: data.orderId });
+    });
+  } catch (error) {
+    console.error("Error processing payment:", error.message);
+    throw error;
+  }
 };
